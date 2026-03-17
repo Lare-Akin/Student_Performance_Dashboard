@@ -9,6 +9,9 @@ from datetime import datetime
 import plotly.express as px
 import plotly.graph_objects as go
 import zipfile
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+import plotly.express as px
 
 # ------------------------------------------------------------------------------
 # 0. DESCRIPTION HELPER FUNCTIONS (unchanged)
@@ -328,18 +331,134 @@ auto_insights(filtered_df)
 st.markdown("---")
 
 # ------------------------------------------------------------------------------
+# FACTORS INFLUENCING HIGH SCORES
+# ------------------------------------------------------------------------------
+def explain_high_score_factors(df, threshold=70):
+    """Return ranked factors that influence achieving a high exam score."""
+    if df.empty:
+        return "No data available for analysis."
+
+    # Create binary target
+    df = df.copy()
+    df["High_Performer"] = (df["Exam_Score"] >= threshold).astype(int)
+
+    # Select numeric predictors
+    predictors = [
+        "Hours_Studied", "Attendance", "Sleep_Hours", "Previous_Scores",
+        "Motivation_Level", "Tutoring_Sessions", "Physical_Activity",
+        "Parental_Involvement", "Access_to_Resources", "Teacher_Quality",
+        "Peer_Influence", "Parental_Education_Level", "Distance_from_Home"
+    ]
+
+    X = df[predictors].fillna(0)
+    y = df["High_Performer"]
+
+    # Scale predictors
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+
+    # Fit logistic regression
+    model = LogisticRegression(max_iter=200)
+    model.fit(X_scaled, y)
+
+    # Extract coefficients
+    importance = pd.DataFrame({
+        "Factor": predictors,
+        "Influence": model.coef_[0]
+    }).sort_values("Influence", ascending=False)
+
+    # Build explanation
+    explanation = "### ⭐ Factors that most influence achieving a high exam score\n"
+    explanation += f"(High score defined as ≥ {threshold})\n\n"
+
+    for _, row in importance.iterrows():
+        direction = "positive" if row["Influence"] > 0 else "negative"
+        strength = abs(row["Influence"])
+
+        if strength > 1.0:
+            level = "strong"
+        elif strength > 0.5:
+            level = "moderate"
+        else:
+            level = "weak"
+
+        explanation += f"- **{row['Factor']}** has a **{level} {direction} influence** on achieving a high score.\n"
+
+    return explanation
+# ------------------------------------------------------------------------------
 # 9. TABS
 # ------------------------------------------------------------------------------
-tab_overview, tab_student, tab_parent, tab_socio, tab_attendance, tab_ld, tab_data = st.tabs([
+tab_overview, tab_student, tab_parent, tab_socio, tab_attendance, tab_ld, tab_factors, tab_data  = st.tabs([
     "Overview",
     "Student Success Profile",
     "Parent Guidance Hub",
     "Socioeconomic Impact",
     "Attendance & Performance",
     "Learning Disabilities Insights",
-    "Raw Data",
+    "What Influences High Scores?",
+    "Raw Data"    
 ])
 
+with tab_factors:
+    st.subheader("What factors influence achieving a high exam score?")
+
+    if len(filtered_df) == 0:
+        st.info("No data available for the current selection.")
+    else:
+        # 1. Narrative explanation
+        explanation = explain_high_score_factors(filtered_df, threshold=70)
+        st.markdown(explanation)
+
+        # 2. Recompute model for visualisation
+        predictors = [
+            "Hours_Studied", "Attendance", "Sleep_Hours", "Previous_Scores",
+            "Motivation_Level", "Tutoring_Sessions", "Physical_Activity",
+            "Parental_Involvement", "Access_to_Resources", "Teacher_Quality",
+            "Peer_Influence", "Parental_Education_Level", "Distance_from_Home"
+        ]
+
+        X = filtered_df[predictors].fillna(0)
+        y = (filtered_df["Exam_Score"] >= 70).astype(int)
+
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+
+        model = LogisticRegression(max_iter=200)
+        model.fit(X_scaled, y)
+
+        importance = pd.DataFrame({
+            "Factor": predictors,
+            "Influence": model.coef_[0]
+        }).sort_values("Influence", ascending=True)
+
+        # 3. 📊 VISUALISATION OF FACTOR INFLUENCE (THIS IS YOUR SNIPPET)
+        st.markdown("### 📊 Factor Influence Chart")
+
+        fig_imp = px.bar(
+            importance,
+            x="Influence",
+            y="Factor",
+            orientation="h",
+            title="Factor Influence on Achieving a High Exam Score",
+            color="Influence",
+            color_continuous_scale="RdBu",
+        )
+        st.plotly_chart(fig_imp, use_container_width=True)
+
+        # 4. 📋 Ranked table (optional)
+        st.markdown("### 📋 Ranked Factors Table")
+
+        ranked_table = importance.copy()
+        ranked_table["Strength"] = ranked_table["Influence"].abs().round(2)
+        ranked_table["Direction"] = ranked_table["Influence"].apply(
+            lambda x: "Positive" if x > 0 else "Negative"
+        )
+
+        st.dataframe(
+            ranked_table[["Factor", "Direction", "Strength"]]
+                .sort_values("Strength", ascending=False),
+            use_container_width=True
+        )
 # ------------------------------------------------------------------------------
 # Helper function to add sample sizes (without 'n=') and centered data labels
 # Now accepts an optional suffix for the data label (e.g., '%')
