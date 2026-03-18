@@ -13,8 +13,168 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 import plotly.express as px
 
+# -------------------------------------------------------------------
+# STATISTICAL SAFETY HELPERS (Transparency for the end-user. Understand how reliable data is. Include ⚠️ as a warning symbol)
+# -------------------------------------------------------------------
+
+MIN_RELIABLE_N = 20
+
+def is_reliable(df, min_n=MIN_RELIABLE_N):
+    """Return True if sample size is large enough for reliable inference."""
+    return len(df) >= min_n
+
+def safe_mean(series):
+    """Return mean only if sample size is reliable; otherwise return None."""
+    return series.mean() if len(series) >= MIN_RELIABLE_N else None
+
+def safe_corr(x, y):
+    """Return correlation only if sample size is reliable; otherwise None."""
+    if len(x) < MIN_RELIABLE_N:
+        return None
+    return x.corr(y)
+
+def safe_rate(successes, total):
+    """Return smoothed rate for small samples, raw rate for reliable samples."""
+    if total == 0:
+        return None
+    if total < MIN_RELIABLE_N:
+        # Laplace smoothing
+        return (successes + 1) / (total + 2)
+    return successes / total
+
+def reliability_caption(df):
+    """Return a caption explaining reliability level."""
+    n = len(df)
+    if n == 0:
+        return "⚠️ No data available for this selection."
+    if n < MIN_RELIABLE_N:
+        return f"⚠️ Based on a small sample (n={n}). Interpret with caution."
+    return f"Sample size: n={n} (statistically reliable)."
+# -------------------------------------------------------------------
+# STRICT STATISTICAL DESCRIPTORS (Trial - use to aid data description)
+# -------------------------------------------------------------------
+
+MIN_RELIABLE_N = 20
+
+def describe_bar_chart(data, x_col, y_col, title_prefix=""):
+    """Describe mean differences between groups with strict reliability rules."""
+    if len(data) < MIN_RELIABLE_N:
+        return f"**{title_prefix}**\nNot enough data for reliable comparison (n={len(data)})."
+
+    grouped = data.groupby(x_col)[y_col].agg(['mean', 'count']).reset_index()
+
+    # To keep only groups with reliable sample sizes
+    reliable_groups = grouped[grouped['count'] >= MIN_RELIABLE_N]
+
+    if reliable_groups.empty:
+        return f"**{title_prefix}**\nNo groups have enough data for reliable comparison."
+
+    max_row = reliable_groups.loc[reliable_groups['mean'].idxmax()]
+    min_row = reliable_groups.loc[reliable_groups['mean'].idxmin()]
+    diff = max_row['mean'] - min_row['mean']
+
+    desc = f"**{title_prefix}**\n"
+    desc += f"Among groups with reliable sample sizes (n ≥ {MIN_RELIABLE_N}), "
+    desc += f"**{max_row[x_col]}** has the highest average score ({max_row['mean']:.1f}), "
+    desc += f"while **{min_row[x_col]}** has the lowest ({min_row['mean']:.1f}). "
+    desc += f"The difference between these reliable groups is **{diff:.1f} points**."
+
+    return desc
+
+
+def describe_scatter(data, x_col, y_col, title_prefix=""):
+    """Describe correlation only when sample size is reliable."""
+    if len(data) < MIN_RELIABLE_N:
+        return f"**{title_prefix}**\nNot enough data to compute a reliable correlation (n={len(data)})."
+
+    corr = data[x_col].corr(data[y_col])
+
+    desc = f"**{title_prefix}**\n"
+    desc += f"The correlation between **{x_col}** and **{y_col}** is **{corr:.2f}**. "
+
+    # Test to see if this interprets correlation strength
+    if abs(corr) < 0.1:
+        desc += "This suggests little to no linear relationship."
+    elif abs(corr) < 0.3:
+        desc += "This suggests a weak relationship."
+    elif abs(corr) < 0.5:
+        desc += "This suggests a moderate relationship."
+    else:
+        desc += "This suggests a strong relationship."
+
+    # Another attempt to trial direction
+    if corr > 0:
+        desc += f" As **{x_col}** increases, **{y_col}** tends to increase."
+    elif corr < 0:
+        desc += f" As **{x_col}** increases, **{y_col}** tends to decrease."
+
+    return desc
+
+
+def describe_histogram(data, col, title_prefix=""):
+    """Describe distribution only when sample size is reliable."""
+    if len(data) < MIN_RELIABLE_N:
+        return f"**{title_prefix}**\nNot enough data to describe the distribution reliably (n={len(data)})."
+
+    mean_val = data[col].mean()
+    median_val = data[col].median()
+    std_val = data[col].std()
+
+    desc = f"**{title_prefix}**\n"
+    desc += f"The average **{col}** is **{mean_val:.1f}**, with a median of **{median_val:.1f}**. "
+    desc += f"Most values fall within about **{std_val:.1f}** points of the average. "
+
+    if abs(mean_val - median_val) > 5:
+        desc += "The distribution appears somewhat skewed."
+    else:
+        desc += "The distribution appears fairly symmetric."
+
+    return desc
+
+
+def describe_heatmap(corr_matrix, title_prefix=""):
+    """Describe strongest correlations only when matrix is reliable."""
+    desc = f"**{title_prefix}**\n"
+
+    corr_vals = corr_matrix.where(~np.eye(corr_matrix.shape[0], dtype=bool)).stack()
+
+    if corr_vals.empty:
+        return desc + "No correlations available."
+
+    max_corr = corr_vals.idxmax()
+    min_corr = corr_vals.idxmin()
+
+    desc += f"The strongest positive correlation is between **{max_corr[0]}** and **{max_corr[1]}** "
+    desc += f"({corr_vals[max_corr]:.2f}). "
+
+    desc += f"The strongest negative correlation is between **{min_corr[0]}** and **{min_corr[1]}** "
+    desc += f"({corr_vals[min_corr]:.2f})."
+
+    return desc
+
+
+def describe_line_chart(data, x_col, y_col, title_prefix=""):
+    """Describe trend only when sample size is reliable."""
+    if len(data) < MIN_RELIABLE_N:
+        return f"**{title_prefix}**\nNot enough data to describe a reliable trend (n={len(data)})."
+
+    y_vals = data[y_col].values
+
+    if y_vals[-1] > y_vals[0]:
+        trend = "increasing"
+    elif y_vals[-1] < y_vals[0]:
+        trend = "decreasing"
+    else:
+        trend = "stable"
+
+    desc = f"**{title_prefix}**\n"
+    desc += f"As **{x_col}** increases, **{y_col}** shows an **{trend}** trend. "
+    desc += f"Values range from **{y_vals.min():.1f}** to **{y_vals.max():.1f}**."
+
+    return desc
+
 # ------------------------------------------------------------------------------
-# 0. DESCRIPTION HELPER FUNCTIONS (unchanged)
+# DESCRIPTION HELPER FUNCTIONS (My visualisation description function - satisfies new user need)
 # ------------------------------------------------------------------------------
 def describe_bar_chart(data, x_col, y_col, title_prefix=""):
     """Generate a description for a bar chart showing mean of y_col per x_col."""
@@ -75,7 +235,7 @@ def describe_histogram(data, col, title_prefix=""):
 
 def describe_heatmap(corr_matrix, title_prefix=""):
     """Describe key correlations from a correlation matrix."""
-    # Exclude self-correlations (1.0)
+    
     corr_vals = corr_matrix.where(~np.eye(corr_matrix.shape[0], dtype=bool)).stack()
     if corr_vals.empty:
         return "No correlations to describe."
@@ -104,7 +264,7 @@ def describe_line_chart(data, x_col, y_col, title_prefix=""):
     return desc
 
 # ------------------------------------------------------------------------------
-# LOAD DATA (Helps ensure my dashboard is connected to a live data source)
+# LOAD DATA (Helps ensure my dashboard is connected to a live data source - use need for up to date visuals)
 # ------------------------------------------------------------------------------
 script_dir = os.path.dirname(__file__)
 csv_path = os.path.join(script_dir, "student_performance_data.csv")
@@ -121,7 +281,7 @@ else:
 df = df.fillna("Unknown")
 
 # ------------------------------------------------------------------------------
-# 2. VALIDATE COLUMNS
+# COLUMNS VALIDATION
 # ------------------------------------------------------------------------------
 expected_cols = [
     "Hours_Studied", "Attendance", "Parental_Involvement", "Access_to_Resources",
@@ -136,7 +296,7 @@ if missing:
     st.stop()
 
 # ------------------------------------------------------------------------------
-# 3. ORDINAL MAPPINGS FOR CORRELATIONS
+# MAPPINGS FOR CORRELATIONS - ORDINAL
 # ------------------------------------------------------------------------------
 ordinal_maps = {
     "Parental_Involvement": {"Low": 1, "Medium": 2, "High": 3},
@@ -152,7 +312,7 @@ for col, mapping in ordinal_maps.items():
     if col in df.columns:
         df[col] = df[col].map(mapping)
 
-# Ensure numeric columns are numeric
+# numeric columns assurance - hard wire
 numeric_cols = [
     "Hours_Studied", "Attendance", "Sleep_Hours", "Previous_Scores",
     "Motivation_Level", "Tutoring_Sessions", "Physical_Activity",
@@ -164,7 +324,7 @@ for col in numeric_cols:
     df[col] = pd.to_numeric(df[col], errors="coerce")
 
 # ------------------------------------------------------------------------------
-# 4. BASIC CONFIG
+# BASIC CONFIG
 # ------------------------------------------------------------------------------
 st.set_page_config(
     page_title="Accessible Student Performance Dashboard",
@@ -172,7 +332,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# Set colour-blind friendly palette
+# Accessibility needs - colour-blindness friendly palette
 sns.set_palette("colorblind")
 plt.style.use("seaborn-v0_8")
 plt.rcParams.update({"font.size": 12})
@@ -181,7 +341,7 @@ HIGH_GRADE_THRESHOLD = 80
 df["High_Grade"] = (df["Exam_Score"] >= HIGH_GRADE_THRESHOLD).astype(int)
 
 # ------------------------------------------------------------------------------
-# 5. TITLE & INTRO
+# DASHBOARD TITLE AND INTRODUCTION (I need to rememer digital services need a meaningful title)
 # ------------------------------------------------------------------------------
 st.title("📚 Accessible Student Performance Dashboard")
 st.markdown("### For students, parents, teachers, and analysts")
@@ -192,7 +352,7 @@ st.markdown(
 st.markdown("---")
 
 # ------------------------------------------------------------------------------
-# 6. SIDEBAR FILTERS
+# SIDEBAR FILTERS
 # ------------------------------------------------------------------------------
 st.sidebar.header("🔍 Filter the Data")
 
@@ -245,7 +405,7 @@ tutoring_range = st.sidebar.slider(
 )
 
 # ------------------------------------------------------------------------------
-# 7. APPLY FILTERS
+# APPLY ALL MY FILTERS
 # ------------------------------------------------------------------------------
 filtered_df = df[
     (df["School_Type"].isin(school_type_filter)) &
@@ -261,20 +421,36 @@ filtered_df = df[
 ].copy()
 
 # ------------------------------------------------------------------------------
-# 8. KEY METRICS + AUTO INSIGHTS
+# THE KEY METRICS AND AUTOMATIC INSIGHTS
 # ------------------------------------------------------------------------------
+
+count = len(filtered_df)
+high = filtered_df["High_Grade"].sum()
+
+rate = safe_rate(high, count)
+avg_score = safe_mean(filtered_df["Exam_Score"])
+avg_att = safe_mean(filtered_df["Attendance"])
+
 col1, col2, col3, col4 = st.columns(4)
+
 with col1:
-    st.metric("👥 Total number of students", len(filtered_df))
+    st.metric("Total number of students", count)
+
 with col2:
-    st.metric("📈 Avg Exam Score", f"{filtered_df['Exam_Score'].mean():.1f}" if len(filtered_df) else "N/A")
+    st.metric("Avg Exam Score",
+              f"{avg_score:.1f}" if avg_score is not None else "Unreliable")
+
 with col3:
-    st.metric("📋 Avg Attendance", f"{filtered_df['Attendance'].mean():.1f}%" if len(filtered_df) else "N/A")
+    st.metric("Avg Attendance",
+              f"{avg_att:.1f}%" if avg_att is not None else "Unreliable")
+
 with col4:
-    if len(filtered_df) > 0:
-        st.metric("🏅 High-grade rate", f"{filtered_df['High_Grade'].mean()*100:.1f}%")
+    if rate is None:
+        st.metric(" High‑grade rate", "N/A")
     else:
-        st.metric("🏅 High-grade rate", "N/A")
+        st.metric("High‑grade rate", f"{rate*100:.1f}%")
+
+st.caption(reliability_caption(filtered_df))
 
 st.markdown("### 🔎 Key Insights for Current Selection")
 
@@ -330,17 +506,34 @@ def auto_insights(df_view):
 auto_insights(filtered_df)
 st.markdown("---")
 
-# ------------------------------------------------------------------------------
+# ----------------------------------------------------------------------
 # FACTORS INFLUENCING HIGH SCORES
-# ------------------------------------------------------------------------------
+# ----------------------------------------------------------------------
 def explain_high_score_factors(df, threshold=70):
-    """Return ranked factors that influence achieving a high exam score."""
+
     if df.empty:
         return "No data available for analysis."
 
-    # Create binary target
     df = df.copy()
+
+    # Create the binary target ONCE
     df["High_Performer"] = (df["Exam_Score"] >= threshold).astype(int)
+
+    # Check class balance AFTER creating the correct target
+    class_counts = df["High_Performer"].value_counts()
+
+    if len(class_counts) < 2:
+        return (
+            "⚠️ Not enough variation in high‑score outcomes to train a reliable model. "
+            f"All students in this filtered group are classified as {class_counts.index[0]}."
+        )
+
+    # Check minimum sample size
+    if len(df) < MIN_RELIABLE_N:
+        return (
+            f"⚠️ Not enough data to train a reliable model (n={len(df)}). "
+            "Increase the sample size by widening your filters."
+        )
 
     # Select numeric predictors
     predictors = [
@@ -357,7 +550,7 @@ def explain_high_score_factors(df, threshold=70):
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    # Fit logistic regression
+    # Fit logistic regression (safe now)
     model = LogisticRegression(max_iter=200)
     model.fit(X_scaled, y)
 
@@ -368,7 +561,7 @@ def explain_high_score_factors(df, threshold=70):
     }).sort_values("Influence", ascending=False)
 
     # Build explanation
-    explanation = "### ⭐ Factors that most influence achieving a high exam score\n"
+    explanation = "###  Factors that most influence achieving a high exam score\n"
     explanation += f"(High score defined as ≥ {threshold})\n\n"
 
     for _, row in importance.iterrows():
@@ -382,17 +575,93 @@ def explain_high_score_factors(df, threshold=70):
         else:
             level = "weak"
 
-        explanation += f"- **{row['Factor']}** has a **{level} {direction} influence** on achieving a high score.\n"
+        explanation += (
+            f"- **{row['Factor']}** has a **{level} {direction} influence** "
+            "on achieving a high score.\n"
+        )
 
     return explanation
+
 # ------------------------------------------------------------------------------
-# 9. TABS
+# PLOTTING FUNCTIONS
+# ------------------------------------------------------------------------------
+def plot_bar_with_stats(data, x_col, y_col, title, xlabel, ylabel, ax, value_suffix=''):
+    """
+    Plot bar chart with mean of y_col per x_col.
+    Shows counts above bars (without 'n=') and mean values inside bars.
+    X‑axis ticks are forced to whole numbers when the x‑values are integers.
+    """
+    grouped = data.groupby(x_col)[y_col].agg(['mean', 'count']).reset_index()
+    x = grouped[x_col]
+    means = grouped['mean']
+    counts = grouped['count']
+
+    colors = sns.color_palette("colorblind", len(x))
+    bars = ax.bar(x, means, color=colors, edgecolor='black', alpha=0.8)
+
+    ax.set_ylabel(ylabel)
+    ax.set_xlabel(xlabel)
+    ax.set_title(title)
+    ax.set_ylim(0, max(100, means.max() + 5))
+
+    # --- Remove 'n=' from top labels ---
+    for bar, count in zip(bars, counts):
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2., height + 1,
+                f'{count}', ha='center', va='bottom', fontsize=9)
+
+    # --- Show mean values inside bars ---
+    for bar, mean_val in zip(bars, means):
+        height = bar.get_height()
+        facecolor = bar.get_facecolor()
+        if len(facecolor) == 3:
+            r, g, b = facecolor
+            luminance = 0.299*r + 0.587*g + 0.114*b
+        else:
+            r, g, b, _ = facecolor
+            luminance = 0.299*r + 0.587*g + 0.114*b
+        text_color = 'white' if luminance < 0.5 else 'black'
+        y_pos = height / 2
+        ax.text(bar.get_x() + bar.get_width()/2., y_pos,
+                f'{mean_val:.1f}{value_suffix}', ha='center', va='center',
+                fontsize=10, fontweight='bold', color=text_color)
+
+    # --- Force integer ticks only if x values are numeric and whole numbers ---
+    if pd.api.types.is_numeric_dtype(x):
+        # Check if all values are effectively integers (within a small tolerance)
+        if all(abs(v - round(v)) < 1e-10 for v in x):
+            ax.set_xticks(sorted(x))
+            ax.set_xticklabels([int(round(v)) for v in sorted(x)])
+
+def analyze_tutoring_performance(df):
+    """Create a scatter plot of tutoring sessions vs exam score with regression line."""
+    if len(df) == 0:
+        st.info("No data available for tutoring analysis.")
+        return
+    fig, ax = plt.subplots(figsize=(6, 4))
+    sns.regplot(x=df["Tutoring_Sessions"], y=df["Exam_Score"],
+                ax=ax, scatter_kws={'alpha':0.7, 'color':'#1D4ED8', 'edgecolor':'black'},
+                line_kws={'color':'red'})
+    ax.set_xlabel("Tutoring Sessions")
+    ax.set_ylabel("Exam Score")
+    ax.set_title("Tutoring Sessions vs Exam Score (individual students)")
+    ax.set_ylim(0, 100)
+    corr = df["Tutoring_Sessions"].corr(df["Exam_Score"]) if len(df) > 1 else np.nan
+    if not np.isnan(corr):
+        ax.text(0.05, 0.95, f'r = {corr:.2f}', transform=ax.transAxes,
+                fontsize=12, verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+    st.pyplot(fig)
+    desc = describe_scatter(df, "Tutoring_Sessions", "Exam_Score", "📊 Tutoring Scatter Insight")
+    st.info(desc)
+
+# ------------------------------------------------------------------------------
+# TABS
 # ------------------------------------------------------------------------------
 tab_overview, tab_student, tab_parent, tab_socio, tab_attendance, tab_ld, tab_factors, tab_data  = st.tabs([
     "Overview",
     "Student Success Profile",
     "Parent Guidance Hub",
-    "Socioeconomic Impact",
+    "socio-economic Impact",
     "Attendance & Performance",
     "Learning Disabilities Insights",
     "What Influences High Scores?",
@@ -402,143 +671,118 @@ tab_overview, tab_student, tab_parent, tab_socio, tab_attendance, tab_ld, tab_fa
 with tab_factors:
     st.subheader("What factors influence achieving a high exam score?")
 
+    # If no data at all
     if len(filtered_df) == 0:
         st.info("No data available for the current selection.")
-    else:
-        # 1. Narrative explanation
-        explanation = explain_high_score_factors(filtered_df, threshold=70)
-        st.markdown(explanation)
+        st.stop()
 
-        # 2. Recompute model for visualisation
-        predictors = [
-            "Hours_Studied", "Attendance", "Sleep_Hours", "Previous_Scores",
-            "Motivation_Level", "Tutoring_Sessions", "Physical_Activity",
-            "Parental_Involvement", "Access_to_Resources", "Teacher_Quality",
-            "Peer_Influence", "Parental_Education_Level", "Distance_from_Home"
-        ]
+    # Prepare target
+    threshold = 70
+    filtered_df = filtered_df.copy()
+    filtered_df["High_Performer"] = (filtered_df["Exam_Score"] >= threshold).astype(int)
 
-        X = filtered_df[predictors].fillna(0)
-        y = (filtered_df["Exam_Score"] >= 70).astype(int)
+    # Class balance check
+    class_counts = filtered_df["High_Performer"].value_counts()
 
-        scaler = StandardScaler()
-        X_scaled = scaler.fit_transform(X)
+    # Minimum sample size check
+    if len(filtered_df) < MIN_RELIABLE_N:
+        st.warning(
+            f"⚠️ Not enough data to train a reliable model (n={len(filtered_df)}). "
+            "Widen your filters to include more students."
+        )
 
-        model = LogisticRegression(max_iter=200)
-        model.fit(X_scaled, y)
-
-        importance = pd.DataFrame({
-            "Factor": predictors,
-            "Influence": model.coef_[0]
-        }).sort_values("Influence", ascending=True)
-
-        # 3. 📊 VISUALISATION OF FACTOR INFLUENCE (THIS IS YOUR SNIPPET)
-        st.markdown("### 📊 Factor Influence Chart")
-
-        fig_imp = px.bar(
-            importance,
-            x="Influence",
-            y="Factor",
+        # Greyed‑out placeholder chart
+        st.markdown("### Factor Influence Chart (Unavailable)")
+        st.info("Not enough data to compute factor influence.")
+        fig_placeholder = px.bar(
+            x=[0], y=["Insufficient Data"],
             orientation="h",
-            title="Factor Influence on Achieving a High Exam Score",
-            color="Influence",
-            color_continuous_scale="RdBu",
+            title="Factor Influence (Unavailable)",
+            color=[0],
+            color_continuous_scale="Greys"
         )
-        st.plotly_chart(fig_imp, use_container_width=True)
+        st.plotly_chart(fig_placeholder, use_container_width=True)
+        st.stop()
 
-        # 4. 📋 Ranked table (optional)
-        st.markdown("### 📋 Ranked Factors Table")
-
-        ranked_table = importance.copy()
-        ranked_table["Strength"] = ranked_table["Influence"].abs().round(2)
-        ranked_table["Direction"] = ranked_table["Influence"].apply(
-            lambda x: "Positive" if x > 0 else "Negative"
+    # Single‑class check
+    if len(class_counts) < 2:
+        st.warning(
+            "⚠️ Not enough variation in high‑score outcomes to train a reliable model. "
+            f"All students in this filtered group are classified as {class_counts.index[0]}."
         )
 
-        st.dataframe(
-            ranked_table[["Factor", "Direction", "Strength"]]
-                .sort_values("Strength", ascending=False),
-            use_container_width=True
+        # Greyed‑out placeholder chart
+        st.markdown("###  Factor Influence Chart (Unavailable)")
+        st.info("Cannot compute factor influence because all students fall into one outcome class.")
+        fig_placeholder = px.bar(
+            x=[0], y=["Single Outcome Class"],
+            orientation="h",
+            title="Factor Influence (Unavailable)",
+            color=[0],
+            color_continuous_scale="Greys"
         )
-# ------------------------------------------------------------------------------
-# Helper function to add sample sizes (without 'n=') and centered data labels
-# Now accepts an optional suffix for the data label (e.g., '%')
-# ------------------------------------------------------------------------------
-def plot_bar_with_stats(data, x_col, y_col, title, xlabel, ylabel, ax, value_suffix=''):
-    """Plot bar chart with sample size above bar and data label centered inside bar."""
-    grouped = data.groupby(x_col)[y_col].agg(['mean', 'count']).reset_index()
-    x = grouped[x_col].astype(str)
-    means = grouped['mean']
-    counts = grouped['count']
-    colors = sns.color_palette("colorblind", len(x))
-    bars = ax.bar(x, means, color=colors, edgecolor='black', alpha=0.8)   # removed error bars
-    ax.set_ylabel(ylabel)
-    ax.set_xlabel(xlabel)
-    ax.set_title(title)
+        st.plotly_chart(fig_placeholder, use_container_width=True)
+        st.stop()
 
-    # Dynamically set y-axis limit to accommodate sample size above bars
-    max_y = max(means) if len(means) else 0
-    ax.set_ylim(0, max(100, max_y + 5))
+    #  model training safety point/benchmark
+    predictors = [
+        "Hours_Studied", "Attendance", "Sleep_Hours", "Previous_Scores",
+        "Motivation_Level", "Tutoring_Sessions", "Physical_Activity",
+        "Parental_Involvement", "Access_to_Resources", "Teacher_Quality",
+        "Peer_Influence", "Parental_Education_Level", "Distance_from_Home"
+    ]
 
-    # Add sample size text above bars (just the number, no "n=")
-    for bar, count in zip(bars, counts):
-        height = bar.get_height()
-        ax.text(bar.get_x() + bar.get_width()/2., height + 2,
-                f'{count}', ha='center', va='bottom', fontsize=9)
+    X = filtered_df[predictors].fillna(0)
+    y = filtered_df["High_Performer"]
 
-    # Add data labels (mean values rounded to nearest whole number) centered inside bars
-    for bar, mean_val in zip(bars, means):
-        height = bar.get_height()
-        # Determine text color based on bar luminance
-        facecolor = bar.get_facecolor()
-        r, g, b, _ = facecolor
-        luminance = 0.299 * r + 0.587 * g + 0.114 * b
-        text_color = 'white' if luminance < 0.5 else 'black'
-        # Place label at vertical center of the bar
-        y_pos = height / 2
-        ax.text(bar.get_x() + bar.get_width()/2., y_pos,
-                f'{mean_val:.0f}{value_suffix}', ha='center', va='center',
-                fontsize=10, fontweight='bold', color=text_color)
+    # Scale predictors
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
 
-def analyze_tutoring_performance(df):
-    """Analyses how tutoring sessions correlate with exam scores and high grades."""
-    st.write("#### 🎓 Impact of Tutoring on Performance")
+    # Train model safely
+    model = LogisticRegression(max_iter=200)
+    model.fit(X_scaled, y)
 
-    if df.empty:
-        st.info("No data available for the current selection.")
-        return
+    # Extract coefficients
+    importance = pd.DataFrame({
+        "Factor": predictors,
+        "Influence": model.coef_[0]
+    }).sort_values("Influence", ascending=True)
 
-    # Grouping data by tutoring sessions
-    tutoring_stats = df.groupby("Tutoring_Sessions").agg(
-        Avg_Score=("Exam_Score", "mean"),
-        High_Grade_Probability=("High_Grade", "mean"),
-        Count=("Exam_Score", "count")
-    ).reset_index()
-    tutoring_stats["High_Grade_Rate (%)"] = tutoring_stats["High_Grade_Probability"] * 100
+    # Narrative explanation
+    explanation = explain_high_score_factors(filtered_df, threshold=threshold)
+    st.markdown(explanation)
 
-    # Bar chart (kept, line chart removed per feedback)
-    fig_avg = px.bar(
-        tutoring_stats,
-        x="Tutoring_Sessions",
-        y="Avg_Score",
-        title="Average Exam Score by Tutoring Sessions",
-        labels={"Avg_Score": "Average Score", "Tutoring_Sessions": "Sessions"},
-        color="Avg_Score",
-        color_continuous_scale="Blues",
-        text="Avg_Score"
+    # Visualisation
+    st.markdown("###  Factor Influence Chart")
+
+    fig_imp = px.bar(
+        importance,
+        x="Influence",
+        y="Factor",
+        orientation="h",
+        title="Factor Influence on Achieving a High Exam Score",
+        color="Influence",
+        color_continuous_scale="RdBu",
     )
-    fig_avg.update_traces(texttemplate='%{text:.0f}%', textposition='inside')  # added '%'
-    st.plotly_chart(fig_avg, use_container_width=True)
+    st.plotly_chart(fig_imp, use_container_width=True)
 
-    desc = describe_bar_chart(df, "Tutoring_Sessions", "Exam_Score", "📊 Tutoring Sessions Impact")
-    st.info(desc)
+    # Ranked table
+    st.markdown("###  Ranked Factors Table")
 
-    st.markdown("---")
-    correlation = df["Tutoring_Sessions"].corr(df["Exam_Score"])
-    st.markdown(f"**Analysis Insight:** There is a correlation of **{correlation:.2f}** between tutoring and scores. "
-                f"On average, students with more sessions tend to reach the high-grade threshold of **{HIGH_GRADE_THRESHOLD}** more frequently.")
+    ranked_table = importance.copy()
+    ranked_table["Strength"] = ranked_table["Influence"].abs().round(2)
+    ranked_table["Direction"] = ranked_table["Influence"].apply(
+        lambda x: "Positive" if x > 0 else "Negative"
+    )
 
+    st.dataframe(
+        ranked_table[["Factor", "Direction", "Strength"]]
+            .sort_values("Strength", ascending=False),
+        use_container_width=True
+    )
 # ------------------------------------------------------------------------------
-# 9A. OVERVIEW (stacked layout)
+# OVERVIEW (stacked layout)
 # ------------------------------------------------------------------------------
 with tab_overview:
     st.subheader("Score Distribution")
@@ -553,7 +797,7 @@ with tab_overview:
         ax.set_title("How exam scores are spread")
         ax.legend()
         st.pyplot(fig)
-        desc = describe_histogram(filtered_df, "Exam_Score", "📊 Score Distribution Insight")
+        desc = describe_histogram(filtered_df, "Exam_Score", " Score Distribution Insight")
         st.info(desc)
     else:
         st.info("No data for current filters.")
@@ -573,7 +817,7 @@ with tab_overview:
                     cbar_kws={'label': 'Correlation'})
         ax.set_title("Correlation between behaviours and exam scores")
         st.pyplot(fig)
-        desc = describe_heatmap(corr_df, "🔥 Correlation Insight")
+        desc = describe_heatmap(corr_df, " Correlation Insight")
         st.info(desc)
     else:
         st.info("Not enough data to compute correlations.")
@@ -586,7 +830,7 @@ with tab_overview:
                             "Average Exam Score by School Type",
                             "School Type", "Exam Score", ax, value_suffix='%')
         st.pyplot(fig)
-        desc = describe_bar_chart(filtered_df, "School_Type", "Exam_Score", "🏫 School Type Insight")
+        desc = describe_bar_chart(filtered_df, "School_Type", "Exam_Score", " School Type Insight")
         st.info(desc)
     else:
         st.info("No school type data for current filters.")
@@ -605,7 +849,7 @@ with tab_overview:
         st.info("No gender data for current filters.")
 
 # ------------------------------------------------------------------------------
-# 9B. STUDENT SUCCESS PROFILE (stacked layout)
+# STUDENT SUCCESS PROFILE
 # ------------------------------------------------------------------------------
 with tab_student:
     st.subheader("What behaviours are linked to high performance?")
@@ -615,7 +859,7 @@ with tab_student:
         st.markdown("#### Hours Studied vs Exam Score")
         fig, ax = plt.subplots(figsize=(6, 4))
         sns.regplot(x=filtered_df["Hours_Studied"], y=filtered_df["Exam_Score"],
-                    ax=ax, scatter_kws={'alpha':0.7, 'color':'#1D4ED8', 'edgecolor':'black'},
+                    ax=ax, scatter_kws={'alpha':0.7, 'color':"#1D4AC5", 'edgecolor':'black'},
                     line_kws={'color':'red'})
         ax.set_xlabel("Hours Studied")
         ax.set_ylabel("Exam Score")
@@ -625,7 +869,7 @@ with tab_student:
         ax.text(0.05, 0.95, f'r = {corr:.2f}', transform=ax.transAxes,
                 fontsize=12, verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
         st.pyplot(fig)
-        desc = describe_scatter(filtered_df, "Hours_Studied", "Exam_Score", "⏱️ Study Hours Insight")
+        desc = describe_scatter(filtered_df, "Hours_Studied", "Exam_Score", " Study Hours Insight")
         st.info(desc)
 
         st.markdown("---")
@@ -642,7 +886,7 @@ with tab_student:
         ax2.text(0.05, 0.95, f'r = {corr:.2f}', transform=ax2.transAxes,
                  fontsize=12, verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
         st.pyplot(fig2)
-        desc = describe_scatter(filtered_df, "Sleep_Hours", "Exam_Score", "😴 Sleep Insight")
+        desc = describe_scatter(filtered_df, "Sleep_Hours", "Exam_Score", " Sleep Insight")
         st.info(desc)
 
         st.markdown("---")
@@ -651,7 +895,8 @@ with tab_student:
         sns.regplot(x=filtered_df["Motivation_Level"], y=filtered_df["Exam_Score"],
                     ax=ax3, scatter_kws={'alpha':0.7, 'color':'#F97316', 'edgecolor':'black'},
                     line_kws={'color':'red'})
-        ax3.set_xlabel("Motivation Level (1=Low, 3=High)")
+        
+        ax3.set_xlabel("Motivation Level (1=Low, 2=Medium, 3=High)")
         ax3.set_ylabel("Exam Score")
         ax3.set_title("Motivation and performance")
         ax3.set_ylim(0, 100)
@@ -659,7 +904,7 @@ with tab_student:
         ax3.text(0.05, 0.95, f'r = {corr:.2f}', transform=ax3.transAxes,
                  fontsize=12, verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
         st.pyplot(fig3)
-        desc = describe_scatter(filtered_df, "Motivation_Level", "Exam_Score", "🔥 Motivation Insight")
+        desc = describe_scatter(filtered_df, "Motivation_Level", "Exam_Score", " Motivation Insight")
         st.info(desc)
 
         st.markdown("---")
@@ -669,7 +914,7 @@ with tab_student:
                             "Tutoring Sessions vs Exam Score",
                             "Tutoring Sessions", "Exam Score", ax4, value_suffix='%')
         st.pyplot(fig4)
-        desc = describe_bar_chart(filtered_df, "Tutoring_Sessions", "Exam_Score", "📚 Tutoring Insight")
+        desc = describe_bar_chart(filtered_df, "Tutoring_Sessions", "Exam_Score", " Tutoring Insight")
         st.info(desc)
 
         st.markdown("---")
@@ -686,14 +931,14 @@ with tab_student:
         ax5.text(0.05, 0.95, f'r = {corr:.2f}', transform=ax5.transAxes,
                  fontsize=12, verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
         st.pyplot(fig5)
-        desc = describe_scatter(filtered_df, "Previous_Scores", "Exam_Score", "📜 Previous Scores Insight")
+        desc = describe_scatter(filtered_df, "Previous_Scores", "Exam_Score", " Previous Scores Insight")
         st.info(desc)
 
         st.markdown("---")
         analyze_tutoring_performance(filtered_df)
 
 # ------------------------------------------------------------------------------
-# 9C. PARENT GUIDANCE HUB (stacked layout)
+# PARENT GUIDANCE HUB
 # ------------------------------------------------------------------------------
 with tab_parent:
     st.subheader("What can parents do to support better grades?")
@@ -704,19 +949,20 @@ with tab_parent:
         fig, ax = plt.subplots(figsize=(6, 4))
         plot_bar_with_stats(filtered_df, "Parental_Involvement", "Exam_Score",
                             "Parental Involvement vs Exam Score",
-                            "Parental Involvement (1=Low,3=High)", "Exam Score", ax, value_suffix='%')
+                            "Parental Involvement (1=Low,2=Medium,3=High)", "Exam Score", ax, value_suffix='%')
         st.pyplot(fig)
-        desc = describe_bar_chart(filtered_df, "Parental_Involvement", "Exam_Score", "👪 Parental Involvement Insight")
+        desc = describe_bar_chart(filtered_df, "Parental_Involvement", "Exam_Score", " Parental Involvement Insight")
         st.info(desc)
+        
 
         st.markdown("---")
         st.markdown("#### Access to Resources vs Average Exam Score")
         fig2, ax2 = plt.subplots(figsize=(6, 4))
         plot_bar_with_stats(filtered_df, "Access_to_Resources", "Exam_Score",
                             "Access to Resources vs Exam Score",
-                            "Access to Resources (1=Low,3=High)", "Exam Score", ax2, value_suffix='%')
+                            "Access to Resources (1=Low,2=Medium,3=High)", "Exam Score", ax2, value_suffix='%')
         st.pyplot(fig2)
-        desc = describe_bar_chart(filtered_df, "Access_to_Resources", "Exam_Score", "💻 Resource Access Insight")
+        desc = describe_bar_chart(filtered_df, "Access_to_Resources", "Exam_Score", " Resource Access Insight")
         st.info(desc)
 
         st.markdown("---")
@@ -724,9 +970,9 @@ with tab_parent:
         fig3, ax3 = plt.subplots(figsize=(6, 4))
         plot_bar_with_stats(filtered_df, "Parental_Education_Level", "Exam_Score",
                             "Parental Education Level vs Exam Score",
-                            "Parental Education (1=High School,3=Postgrad)", "Exam Score", ax3, value_suffix='%')
+                            "Parental Education (1=High School,2=College,3=Postgrad)", "Exam Score", ax3, value_suffix='%')
         st.pyplot(fig3)
-        desc = describe_bar_chart(filtered_df, "Parental_Education_Level", "Exam_Score", "🎓 Parental Education Insight")
+        desc = describe_bar_chart(filtered_df, "Parental_Education_Level", "Exam_Score", " Parental Education Insight")
         st.info(desc)
 
         st.markdown("---")
@@ -746,7 +992,7 @@ with tab_parent:
         for bar, count in zip(bars, counts):
             height = bar.get_height()
             ax4.text(bar.get_x() + bar.get_width()/2., height + 2,
-                     f'{count}', ha='center', va='bottom', fontsize=9)   # removed 'n='
+                     f'{count}', ha='center', va='bottom', fontsize=9)
 
         for bar, mean_val in zip(bars, means):
             height = bar.get_height()
@@ -760,7 +1006,7 @@ with tab_parent:
                      fontsize=10, fontweight='bold', color=text_color)
         st.pyplot(fig4)
 
-        desc = f"**🌐 Internet Access Insight**  \n"
+        desc = f"** Internet Access Insight**  \n"
         if len(internet_rate) == 2:
             yes_rate = internet_rate.loc[internet_rate['Internet_Access']=='Yes', 'mean'].values[0]*100
             no_rate = internet_rate.loc[internet_rate['Internet_Access']=='No', 'mean'].values[0]*100
@@ -770,10 +1016,10 @@ with tab_parent:
         st.info(desc)
 
 # ------------------------------------------------------------------------------
-# 9D. SOCIOECONOMIC IMPACT (stacked layout)
+# SOCIO-ECONOMIC IMPACT
 # ------------------------------------------------------------------------------
 with tab_socio:
-    st.subheader("Do socioeconomic factors affect performance?")
+    st.subheader("Do socio-economic factors affect performance?")
     if len(filtered_df) == 0:
         st.info("No data for current filters.")
     else:
@@ -783,7 +1029,7 @@ with tab_socio:
                             "Family Income vs Exam Score",
                             "Family Income", "Exam Score", ax, value_suffix='%')
         st.pyplot(fig)
-        desc = describe_bar_chart(filtered_df, "Family_Income", "Exam_Score", "💰 Family Income Insight")
+        desc = describe_bar_chart(filtered_df, "Family_Income", "Exam_Score", " Family Income Insight")
         st.info(desc)
 
         st.markdown("---")
@@ -792,7 +1038,7 @@ with tab_socio:
         sns.regplot(x=filtered_df["Distance_from_Home"], y=filtered_df["Exam_Score"],
                     ax=ax2, scatter_kws={'alpha':0.7, 'color':'#DC2626', 'edgecolor':'black'},
                     line_kws={'color':'red'})
-        ax2.set_xlabel("Distance from Home (1=Near, 3=Far)")
+        ax2.set_xlabel("Distance from Home (1=Near, 2=Moderate, 3=Far)")
         ax2.set_ylabel("Exam Score")
         ax2.set_title("Does distance affect performance?")
         ax2.set_ylim(0, 100)
@@ -800,7 +1046,7 @@ with tab_socio:
         ax2.text(0.05, 0.95, f'r = {corr:.2f}', transform=ax2.transAxes,
                  fontsize=12, verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
         st.pyplot(fig2)
-        desc = describe_scatter(filtered_df, "Distance_from_Home", "Exam_Score", "📍 Distance Insight")
+        desc = describe_scatter(filtered_df, "Distance_from_Home", "Exam_Score", " Distance Insight")
         st.info(desc)
 
         st.markdown("---")
@@ -810,7 +1056,7 @@ with tab_socio:
                             "School Type vs Exam Score",
                             "School Type", "Exam Score", ax3, value_suffix='%')
         st.pyplot(fig3)
-        desc = describe_bar_chart(filtered_df, "School_Type", "Exam_Score", "🏫 School Type Insight")
+        desc = describe_bar_chart(filtered_df, "School_Type", "Exam_Score", " School Type Insight")
         st.info(desc)
 
         st.markdown("---")
@@ -818,9 +1064,9 @@ with tab_socio:
         fig4, ax4 = plt.subplots(figsize=(6, 4))
         plot_bar_with_stats(filtered_df, "Teacher_Quality", "Exam_Score",
                             "Teacher Quality vs Exam Score",
-                            "Teacher Quality (1=Low,3=High)", "Exam Score", ax4, value_suffix='%')
+                            "Teacher Quality (1=Low, 2=Medium, 3=High)", "Exam Score", ax4, value_suffix='%')
         st.pyplot(fig4)
-        desc = describe_bar_chart(filtered_df, "Teacher_Quality", "Exam_Score", "👩‍🏫 Teacher Quality Insight")
+        desc = describe_bar_chart(filtered_df, "Teacher_Quality", "Exam_Score", " Teacher Quality Insight")
         st.info(desc)
 
         st.markdown("---")
@@ -828,13 +1074,13 @@ with tab_socio:
         fig5, ax5 = plt.subplots(figsize=(6, 4))
         plot_bar_with_stats(filtered_df, "Peer_Influence", "Exam_Score",
                             "Peer Influence vs Exam Score",
-                            "Peer Influence (1=Negative,3=Positive)", "Exam Score", ax5, value_suffix='%')
+                            "Peer Influence (1=Negative, 2=Neutral, 3=Positive)", "Exam Score", ax5, value_suffix='%')
         st.pyplot(fig5)
-        desc = describe_bar_chart(filtered_df, "Peer_Influence", "Exam_Score", "👥 Peer Influence Insight")
+        desc = describe_bar_chart(filtered_df, "Peer_Influence", "Exam_Score", " Peer Influence Insight")
         st.info(desc)
 
 # ------------------------------------------------------------------------------
-# 9E. ATTENDANCE & PERFORMANCE (already single column)
+# ATTENDANCE & PERFORMANCE
 # ------------------------------------------------------------------------------
 with tab_attendance:
     st.subheader("Does attendance affect grades?")
@@ -853,7 +1099,7 @@ with tab_attendance:
         ax.text(0.05, 0.95, f'r = {corr:.2f}', transform=ax.transAxes,
                 fontsize=12, verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
         st.pyplot(fig)
-        desc = describe_scatter(filtered_df, "Attendance", "Exam_Score", "📅 Attendance Insight")
+        desc = describe_scatter(filtered_df, "Attendance", "Exam_Score", " Attendance Insight")
         st.info(desc)
 
         st.markdown("---")
@@ -891,7 +1137,7 @@ with tab_ld:
             fig, ax = plt.subplots(figsize=(6, 4))
             colors = sns.color_palette("colorblind", 2)
             bars = ax.bar(comp["LD_Status"], comp["Avg_Score"],
-                          color=colors, edgecolor='black', alpha=0.8)   # removed error bars
+                          color=colors, edgecolor='black', alpha=0.8)   # remove error bars
             ax.set_ylabel("Exam Score")
             ax.set_title("LD vs Non-LD: Average Exam Score")
             max_y = max(comp["Avg_Score"]) if len(comp) else 0
@@ -900,7 +1146,7 @@ with tab_ld:
             for bar, count in zip(bars, comp["Count"]):
                 height = bar.get_height()
                 ax.text(bar.get_x() + bar.get_width()/2., height + 2,
-                        f'{count}', ha='center', va='bottom', fontsize=9)   # removed 'n='
+                        f'{count}', ha='center', va='bottom', fontsize=9)   # remove 'n='
 
             for bar, avg_val in zip(bars, comp["Avg_Score"]):
                 height = bar.get_height()
@@ -910,7 +1156,7 @@ with tab_ld:
                 text_color = 'white' if luminance < 0.5 else 'black'
                 y_pos = height / 2
                 ax.text(bar.get_x() + bar.get_width()/2., y_pos,
-                        f'{avg_val:.0f}%', ha='center', va='center',   # added '%'
+                        f'{avg_val:.0f}%', ha='center', va='center',   # add '%'
                         fontsize=10, fontweight='bold', color=text_color)
             st.pyplot(fig)
 
@@ -931,7 +1177,7 @@ with tab_ld:
                                 "Extracurricular vs Exam Score (LD)",
                                 "Extracurricular", "Exam Score", ax2, value_suffix='%')
             st.pyplot(fig2)
-            desc = describe_bar_chart(ld_df, "Extracurricular_Activities", "Exam_Score", "🎭 Extracurricular (LD) Insight")
+            desc = describe_bar_chart(ld_df, "Extracurricular_Activities", "Exam_Score", " Extracurricular (LD) Insight")
             st.info(desc)
         else:
             st.info("No variation in extracurricular activities for LD students.")
@@ -944,7 +1190,7 @@ with tab_ld:
                                 "Tutoring Sessions vs Exam Score (LD)",
                                 "Tutoring Sessions", "Exam Score", ax3, value_suffix='%')
             st.pyplot(fig3)
-            desc = describe_bar_chart(ld_df, "Tutoring_Sessions", "Exam_Score", "📚 Tutoring (LD) Insight")
+            desc = describe_bar_chart(ld_df, "Tutoring_Sessions", "Exam_Score", " Tutoring (LD) Insight")
             st.info(desc)
         else:
             st.info("No variation in tutoring sessions for LD students.")
@@ -965,13 +1211,13 @@ with tab_ld:
                      fontsize=12, verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
         st.pyplot(fig4)
         if len(ld_df) > 1:
-            desc = describe_scatter(ld_df, "Attendance", "Exam_Score", "📅 Attendance (LD) Insight")
+            desc = describe_scatter(ld_df, "Attendance", "Exam_Score", " Attendance (LD) Insight")
         else:
             desc = "Not enough LD students to analyze attendance correlation."
         st.info(desc)
 
 # ------------------------------------------------------------------------------
-# 9G. RAW DATA
+# RAW DATA (New user need to see raw data for transparency)
 # ------------------------------------------------------------------------------
 with tab_data:
     st.subheader("Raw Data (Filtered)")
@@ -979,11 +1225,11 @@ with tab_data:
     st.caption("You can scroll, sort, and export this data from the menu in the top-right of the table.")
 
 # ------------------------------------------------------------------------------
-# 9H. DOWNLOAD REPORT (NEW TAB)
+# DOWNLOAD REPORT (Testing this due to question asked by participant during research)
 # ------------------------------------------------------------------------------
 tab_report = st.tabs(["Download Report"])[0]
 with tab_report:
-    st.subheader("📥 Download Full Report (ZIP)")
+    st.subheader(" Download Full Report (ZIP)")
     st.markdown(
         "This report includes:\n"
         "- Key metrics\n"
@@ -1049,24 +1295,24 @@ with tab_report:
             z.writestr("filtered_data.csv", csv_buffer.getvalue())
 
         st.download_button(
-            label="📦 Download ZIP Report",
+            label=" Download ZIP Report",
             data=zip_buffer.getvalue(),
             file_name="student_performance_report.zip",
             mime="application/zip"
         )
 
 # ------------------------------------------------------------------------------
-# 10. FOOTER
+# FOOTER
 # ------------------------------------------------------------------------------
 st.markdown("---")
 st.caption(
-    "Dashboard updates automatically when filters change. Theme and layout are designed for clarity and accessibility."
+    "Laré Akinmutande (Feb - March 2026) Dashboard updates automatically when filters change. Theme and layout are designed for clarity and accessibility."
 )
 
 # ------------------------------------------------------------------------------
-# 11. DOWNLOAD REPORT (Sidebar)
+# DOWNLOAD REPORT 2 (Testing this due to question asked by participant during research)
 # ------------------------------------------------------------------------------
-with st.sidebar.expander("📥 Download Report"):
+with st.sidebar.expander(" Download Report"):
     if st.button("Generate Report"):
         report_lines = []
         report_lines.append("STUDENT PERFORMANCE REPORT")
@@ -1090,8 +1336,8 @@ with st.sidebar.expander("📥 Download Report"):
                 ("Motivation_Level", "Success vs Motivation", "03_Success_Motivation.png"),
                 ("Parental_Education_Level", "Impact of Parental Education", "04_Parent_Education.png"),
                 ("Parental_Involvement", "Impact of Parental Involvement", "05_Parent_Involvement.png"),
-                ("Family_Income", "Socioeconomic Performance", "06_Socioeconomic_Income.png"),
-                ("Access_to_Resources", "Impact of Resource Access", "07_Socioeconomic_Resources.png"),
+                ("Family_Income", "socio-economic Performance", "06_socio-economic_Income.png"),
+                ("Access_to_Resources", "Impact of Resource Access", "07_socio-economic_Resources.png"),
                 ("Learning_Disabilities", "Disability Success Insights", "08_LD_Success_Insights.png")
             ]
 
@@ -1106,7 +1352,7 @@ with st.sidebar.expander("📥 Download Report"):
 
         st.success("✅ Full report with all visualisations is ready!")
         st.download_button(
-            label="💾 Download ZIP Report",
+            label=" Download ZIP Report",
             data=zip_buffer.getvalue(),
             file_name=f"student_performance_report_{datetime.now().strftime('%Y%m%d')}.zip",
             mime="application/zip"
